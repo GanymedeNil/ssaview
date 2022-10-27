@@ -5,7 +5,9 @@ package main
 
 import (
 	"bytes"
+	"embed"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"go/ast"
 	"go/importer"
@@ -97,13 +99,13 @@ func writeJSON(w http.ResponseWriter, data interface{}) error {
 	return err
 }
 
-func main() {
+func server(port string) {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		f, err := os.Open(indexPage)
+		data, err := f.Open(indexPage)
 		if err != nil {
 			writeJSON(w, err)
 		}
-		io.Copy(w, f)
+		io.Copy(w, data)
 	})
 	http.HandleFunc("/ssa", func(w http.ResponseWriter, r *http.Request) {
 		ssa, err := toSSA(r.Body, "main.go", false)
@@ -114,9 +116,47 @@ func main() {
 		defer r.Body.Close()
 		writeJSON(w, struct{ All string }{string(ssa)})
 	})
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
+	fmt.Printf("Service address %s\n", ":"+port)
 	fmt.Println(http.ListenAndServe(":"+port, nil))
+}
+
+func command(filePath string) {
+	fd, err := os.OpenFile(filePath, os.O_RDONLY, 0655)
+	if err != nil {
+		panic(err)
+	}
+	ssa, err := toSSA(fd, fd.Name(), false)
+	if err != nil {
+		panic(err)
+	}
+	os.Stdout.Write(ssa)
+
+}
+
+var Config struct {
+	Port     string
+	RunMode  string
+	FilePath string
+}
+
+//go:embed index.html
+var f embed.FS
+
+func init() {
+	flag.StringVar(&Config.Port, "port", "8080", "Server Port")
+	flag.StringVar(&Config.RunMode, "run-mode", "server", `Run mode can be "command" or "server"`)
+	flag.StringVar(&Config.FilePath, "file-path", "", "File path at the command line")
+}
+
+func main() {
+	flag.Parse()
+	if Config.RunMode == "command" {
+		if Config.FilePath == "" {
+			panic("The file path on the command line is required!")
+		}
+		command(Config.FilePath)
+	} else {
+		server(Config.Port)
+	}
+
 }
